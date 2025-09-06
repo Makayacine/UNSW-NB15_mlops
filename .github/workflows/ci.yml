@@ -8,12 +8,24 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      PYTHONUNBUFFERED: "1"
+      PIP_NO_CACHE_DIR: "1"
+
     steps:
       - name: Checkout (with LFS)
         uses: actions/checkout@v4
         with:
           lfs: true
           fetch-depth: 0
+
+      - name: Ensure LFS files are present
+        run: |
+          git lfs version
+          git lfs fetch --all
+          git lfs checkout
+          echo "---- LFS tracked files ----"
+          git lfs ls-files -l || true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -22,23 +34,28 @@ jobs:
 
       - name: Install deps
         run: |
+          python -V
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
             pip install onnxruntime==1.18.* onnx==1.16.* numpy pandas mlflow==3.3.2 pytest
           fi
+          python - <<'PY'
+          import onnx, sys
+          import onnxruntime as ort
+          import numpy, pandas
+          print("onnx:", onnx.__version__)
+          print("onnxruntime:", ort.__version__)
+          print("numpy:", numpy.__version__)
+          print("pandas:", pandas.__version__)
+          PY
 
-      - name: Verify bundle + LFS
+      - name: Verify bundle
         run: |
-          echo "== Git LFS status =="
-          git lfs version
-          git lfs ls-files -l || true
-
-          echo "== List bundle dir =="
+          set -x
+          echo "== repo tree (bundle) =="
           ls -lah notebooks/ids_unsw/models/bundle_xgb || true
-
-          echo "== Python check =="
           python - <<'PY'
           from pathlib import Path
           b = Path("notebooks/ids_unsw/models/bundle_xgb")
@@ -46,11 +63,21 @@ jobs:
               print(p, "exists?", p.exists(), "size=", (p.stat().st_size if p.exists() else "-"))
           PY
 
-      - name: Run tests
+      - name: Run tests (capture log)
+        id: pytest
+        continue-on-error: true
         run: |
-          pytest -q --maxfail=1 -rA
+          set -o pipefail
+          pytest -vv 2>&1 | tee pytest.log
+
+      - name: Show failing tail
+        if: steps.pytest.outcome == 'failure'
+        run: |
+          echo "---- last 200 lines of pytest.log ----"
+          tail -n 200 pytest.log || true
 
       - name: MLflow smoke run (creates ./mlruns)
+        if: always()
         run: |
           python - <<'PY'
           import os, mlflow
@@ -61,8 +88,15 @@ jobs:
           print("mlflow smoke run completed")
           PY
 
-      - name: Upload mlruns artifact
+      - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mlruns
-          path: mlruns
+          name: ci-artifacts
+          path: |
+            pytest.log
+            mlruns
+
+      - name: Fail if pytest failed
+        if: steps.pytest.outcome == 'failure'
+        run: exit 1
