@@ -1,0 +1,42 @@
+# ========= Runtime API image (CPU/ONNX) =========
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tini curl \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# App code
+COPY ids_unsw ./ids_unsw
+
+# Model bundle + scaler (mirror your notebook layout used by the app)
+COPY notebooks/ids_unsw/models/scaler.pkl \
+     notebooks/ids_unsw/models/scaler.pkl
+COPY notebooks/ids_unsw/models/bundle_xgb \
+     notebooks/ids_unsw/models/bundle_xgb
+
+# Runtime deps
+RUN pip install --no-cache-dir \
+    fastapi==0.115.* "uvicorn[standard]==0.30.*" \
+    numpy==1.26.* pandas==2.2.* \
+    scikit-learn==1.7.1 \
+    onnxruntime==1.18.* \
+    mlflow==3.3.2
+
+ENV MODEL_BASE=/app/notebooks/ids_unsw/models \
+    BUNDLE_DIR=/app/notebooks/ids_unsw/models/bundle_xgb \
+    PORT=8000
+
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
+  CMD curl -fsS -H "Authorization: Bearer ${IDS_API_TOKEN}" \
+      http://127.0.0.1:${PORT}/health || exit 1
+
+
+ENTRYPOINT ["/usr/bin/tini","--"]
+CMD ["uvicorn","ids_unsw.serve.app:app","--host","0.0.0.0","--port","8000","--workers","1"]

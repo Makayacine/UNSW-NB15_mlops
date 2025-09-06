@@ -1,0 +1,274 @@
+{
+    "info": {
+        "_postman_id": "f484ef62-0fa2-4b64-b76d-396f31e61764",
+        "name": "UNSW-IDS API",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+        "_exporter_id": "45835536",
+        "_collection_link": "https://vincembanze.postman.co/workspace/Cashapp-Mock-API~526d7d75-055a-48bf-84fb-9fc85169daee/collection/45835536-f484ef62-0fa2-4b64-b76d-396f31e61764?action=share&source=collection_link&creator=45835536"
+    },
+    "auth": {
+        "type": "bearer",
+        "bearer": [
+            {
+                "key": "token",
+                "value": "{{apiToken}}",
+                "type": "string"
+            }
+        ]
+    },
+    "item": [
+        {
+            "name": "GET /health",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('status 200', () => pm.response.to.have.status(200));",
+                            "const body = pm.response.json();",
+                            "pm.expect(body.status).to.eql('ok');",
+                            "pm.expect(body.n_features).to.be.a('number');",
+                            "pm.environment.set('threshold', String(body.threshold));",
+                            "pm.environment.set('n_features', String(body.n_features));"
+                        ],
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{baseUrl}}/health",
+                    "host": [
+                        "{{baseUrl}}"
+                    ],
+                    "path": [
+                        "health"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "GET /features",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('status 200', () => pm.response.to.have.status(200));",
+                            "const body = pm.response.json();",
+                            "pm.expect(body.features).to.be.an('array').that.is.not.empty;",
+                            "const nf = parseInt(pm.environment.get('n_features'));",
+                            "pm.expect(body.features.length).to.eql(nf);",
+                            "['dur','proto','service','state'].forEach(k=>pm.expect(body.features).to.include(k));",
+                            "pm.environment.set('features_len', String(body.features.length));"
+                        ],
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{baseUrl}}/features",
+                    "host": [
+                        "{{baseUrl}}"
+                    ],
+                    "path": [
+                        "features"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "GET /meta",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('status 200', () => pm.response.to.have.status(200));",
+                            "const body = pm.response.json();",
+                            "pm.expect(body.model).to.be.a('string');",
+                            "pm.expect(body.n_features).to.be.a('number');",
+                            "if (body.threshold !== undefined) pm.environment.set('threshold', String(body.threshold));",
+                            "pm.environment.set('model_name', body.model);"
+                        ],
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{baseUrl}}/meta",
+                    "host": [
+                        "{{baseUrl}}"
+                    ],
+                    "path": [
+                        "meta"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "POST /predict_proba (dummy row)",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('status 200', () => pm.response.to.have.status(200));",
+                            "const body = pm.response.json();",
+                            "pm.expect(body.n).to.eql(1);",
+                            "pm.expect(body.probabilities).to.be.an('array').with.length(1);",
+                            "const p = body.probabilities[0];",
+                            "pm.expect(p).to.be.within(0,1);",
+                            "pm.environment.set('last_prob', String(p));"
+                        ],
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\"instances\":[{\"dur\":0,\"proto\":0,\"service\":0,\"state\":0,\"spkts\":0,\"dpkts\":0,\"sbytes\":0,\"dbytes\":0,\"rate\":0,\"sload\":0,\"dload\":0,\"sloss\":0,\"dloss\":0,\"sinpkt\":0,\"dinpkt\":0,\"sjit\":0,\"djit\":0,\"swin\":0,\"stcpb\":0,\"dtcpb\":0,\"dwin\":0,\"tcprtt\":0,\"synack\":0,\"ackdat\":0,\"smean\":0,\"dmean\":0,\"trans_depth\":0,\"response_body_len\":0,\"ct_src_dport_ltm\":0,\"ct_dst_sport_ltm\":0,\"is_ftp_login\":0,\"ct_ftp_cmd\":0,\"ct_flw_http_mthd\":0,\"is_sm_ips_ports\":0}]}"
+                },
+                "url": {
+                    "raw": "{{baseUrl}}/predict_proba",
+                    "host": [
+                        "{{baseUrl}}"
+                    ],
+                    "path": [
+                        "predict_proba"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "POST /predict (dummy row consistency)",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('status 200', () => pm.response.to.have.status(200));",
+                            "const body = pm.response.json();",
+                            "pm.expect(body.predictions).to.be.an('array').with.length(1);",
+                            "pm.expect(body.probabilities).to.be.an('array').with.length(1);",
+                            "pm.expect(body.threshold).to.be.a('number');",
+                            "const p = body.probabilities[0];",
+                            "const thr = body.threshold;",
+                            "const pred = body.predictions[0];",
+                            "pm.test('prediction matches prob vs threshold', () => pm.expect((p >= thr ? 1 : 0)).to.eql(pred));",
+                            "// cross-check with prior /predict_proba result",
+                            "const prev = parseFloat(pm.environment.get('last_prob'));",
+                            "pm.test('proba matches previous call (±1e-6)', () => pm.expect(Math.abs(p - prev)).to.be.below(1e-6));"
+                        ],
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\"instances\":[{\"dur\":0,\"proto\":0,\"service\":0,\"state\":0,\"spkts\":0,\"dpkts\":0,\"sbytes\":0,\"dbytes\":0,\"rate\":0,\"sload\":0,\"dload\":0,\"sloss\":0,\"dloss\":0,\"sinpkt\":0,\"dinpkt\":0,\"sjit\":0,\"djit\":0,\"swin\":0,\"stcpb\":0,\"dtcpb\":0,\"dwin\":0,\"tcprtt\":0,\"synack\":0,\"ackdat\":0,\"smean\":0,\"dmean\":0,\"trans_depth\":0,\"response_body_len\":0,\"ct_src_dport_ltm\":0,\"ct_dst_sport_ltm\":0,\"is_ftp_login\":0,\"ct_ftp_cmd\":0,\"ct_flw_http_mthd\":0,\"is_sm_ips_ports\":0}]}"
+                },
+                "url": {
+                    "raw": "{{baseUrl}}/predict",
+                    "host": [
+                        "{{baseUrl}}"
+                    ],
+                    "path": [
+                        "predict"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "POST /predict (missing feature → 400)",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('status 400', () => pm.response.to.have.status(400));",
+                            "const j = pm.response.json();",
+                            "pm.expect(j.detail).to.have.property('error', 'feature_mismatch');",
+                            "pm.expect(j.detail.missing).to.include('proto')"
+                        ],
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\"instances\":[{\"dur\":0,\"service\":0,\"state\":0,\"spkts\":0,\"dpkts\":0,\"sbytes\":0,\"dbytes\":0,\"rate\":0,\"sload\":0,\"dload\":0,\"sloss\":0,\"dloss\":0,\"sinpkt\":0,\"dinpkt\":0,\"sjit\":0,\"djit\":0,\"swin\":0,\"stcpb\":0,\"dtcpb\":0,\"dwin\":0,\"tcprtt\":0,\"synack\":0,\"ackdat\":0,\"smean\":0,\"dmean\":0,\"trans_depth\":0,\"response_body_len\":0,\"ct_src_dport_ltm\":0,\"ct_dst_sport_ltm\":0,\"is_ftp_login\":0,\"ct_ftp_cmd\":0,\"ct_flw_http_mthd\":0,\"is_sm_ips_ports\":0}]}"
+                },
+                "url": {
+                    "raw": "{{baseUrl}}/predict",
+                    "host": [
+                        "{{baseUrl}}"
+                    ],
+                    "path": [
+                        "predict"
+                    ]
+                }
+            },
+            "response": []
+        }
+    ],
+    "event": [
+        {
+            "listen": "prerequest",
+            "script": {
+                "type": "text/javascript",
+                "packages": {},
+                "exec": [
+                    ""
+                ]
+            }
+        },
+        {
+            "listen": "test",
+            "script": {
+                "type": "text/javascript",
+                "packages": {},
+                "exec": [
+                    ""
+                ]
+            }
+        }
+    ]
+}

@@ -1,0 +1,23 @@
+services:
+  tensorflow:
+    container_name: tf_gpu_project
+    image: tf-gpu-fixed
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    ports:
+      - "8888:8888"
+    volumes:
+      - .:/tf/tf_gpu_project
+    gpus: all
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      # Optionally set/override the tracking URI here:
+      # - MLFLOW_TRACKING_URI=http://mlflow:5000
+    # Ensure Linux containers can resolve host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: >
+      jupyter lab --ip=0.0.0.0 --no-browser --allow-root
+      --ServerApp.token='' --ServerApp.password=''

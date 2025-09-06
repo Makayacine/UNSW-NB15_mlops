@@ -1,0 +1,29 @@
+FROM tensorflow/tensorflow:latest-gpu
+
+# Optional CUDA libs TF may touch + Git
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    libcusparse11 libcusolver11 git && \
+    rm -rf /var/lib/apt/lists/*
+
+# Jupyter + data stack + client-only MLflow + libs
+RUN pip install --no-cache-dir \
+    "nvidia-cudnn-cu12>=9,<10" \
+    "nvidia-cublas-cu12>=12" \
+    jupyter pandas scikit-learn matplotlib seaborn pyarrow \
+    mlflow-skinny==3.3.2 xgboost onnx onnxruntime tqdm \
+    cupy-cuda12x onnxmltools onnxconverter-common skl2onnx
+    fastapi uvicorn
+
+# ---- PyTorch (GPU, CUDA 12.8 wheels) ----
+RUN pip install --no-cache-dir \
+    torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 \
+    --index-url https://download.pytorch.org/whl/cu128
+
+# CUDA + WSL libs
+ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/lib/wsl/lib:/usr/local/lib/python3.11/dist-packages/nvidia/cudnn/lib:/usr/local/lib/python3.11/dist-packages/nvidia/cublas/lib:${LD_LIBRARY_PATH}"
+
+# Point the client at your existing MLflow server (override via compose/env if needed)
+ENV MLFLOW_TRACKING_URI="http://host.docker.internal:5000"
+
+WORKDIR /tf
+CMD ["bash","-lc","jupyter lab --ip=0.0.0.0 --no-browser --allow-root --ServerApp.token='' --ServerApp.password=''"]
