@@ -1,5 +1,20 @@
 name: CI
-on: [push]
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Optional extra image tag (e.g., v0.1.0)'
+        required: false
+        default: ''
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/ids-unsw-api
 
 jobs:
   test:
@@ -86,11 +101,16 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/ids-unsw-api
+          images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
+            # always
             type=raw,value=sha-${{ github.sha }}
-
+            # main branch gets latest
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            # PRs get pr-<number>
+            type=ref,event=pr
+            # manual runs can add an extra tag
+            type=raw,value=${{ github.event.inputs.image_tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag != '' }}
       - name: Build & push release image
         uses: docker/build-push-action@v5
         with:
@@ -99,4 +119,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
