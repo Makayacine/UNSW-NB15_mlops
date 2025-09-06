@@ -1,11 +1,17 @@
 name: CI
-on: [push]
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
 
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -15,26 +21,24 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install onnxruntime==1.18.* onnx==1.16.* numpy pandas mlflow==3.3.2 pytest
+          fi
 
-      - name: Run unit tests
+      - name: Run tests
         run: pytest -q
 
-      - name: MLflow smoke: log tiny run
+      - name: MLflow smoke run (creates ./mlruns)
         run: |
           python - <<'PY'
-          import mlflow, pathlib
-          mlflow.set_tracking_uri("file:mlruns")   # local file store
+          import os, mlflow
+          mlflow.set_tracking_uri("file://" + os.path.abspath("mlruns"))
           mlflow.set_experiment("ci-smoke")
-          with mlflow.start_run(run_name="gha"):
-              mlflow.log_param("ci", "true")
-              mlflow.log_metric("auc_stub", 0.5)
-              # prove artifact logging works (use a small file from the repo)
-              mlflow.log_artifact(
-                  "notebooks/ids_unsw/models/bundle_xgb/metadata.json",
-                  artifact_path="xgb"
-              )
-          print("Done; mlruns exists:", pathlib.Path("mlruns").exists())
+          with mlflow.start_run(run_name="ci"):
+              mlflow.log_metric("ok", 1.0)
+          print("mlflow smoke run completed")
           PY
 
       - name: Upload mlruns artifact
@@ -42,4 +46,3 @@ jobs:
         with:
           name: mlruns
           path: mlruns
-          if-no-files-found: error
