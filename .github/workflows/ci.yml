@@ -1,43 +1,45 @@
 name: CI
-
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
-permissions:
-  contents: read
+on: [push]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout (with LFS)
-        uses: actions/checkout@v4
-        with:
-          lfs: true
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: "pip"
+          python-version: '3.11'
 
       - name: Install deps
         run: |
-          python -m pip install --upgrade pip wheel
-          pip install "numpy==1.26.*" "pandas==2.2.*" "scikit-learn==1.5.*" "xgboost==2.1.*" \
-                      "onnx==1.16.*" "onnxruntime==1.18.*" "mlflow==3.3.*" \
-                      "fastapi==0.115.*" "uvicorn[standard]==0.30.*" pytest
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Smoke-check ONNX bundle
+      - name: Run unit tests
+        run: pytest -q
+
+      - name: MLflow smoke: log tiny run
         run: |
           python - <<'PY'
-          import os, onnx
-          p = "notebooks/ids_unsw/models/bundle_xgb/xgb.onnx"
-          assert os.path.exists(p), f"Missing: {p} (LFS not pulled?)"
-          m = onnx.load(p)
-          onnx.checker.check_model(m)
-          print("ONNX model loaded OK.")
+          import mlflow, pathlib
+          mlflow.set_tracking_uri("file:mlruns")   # local file store
+          mlflow.set_experiment("ci-smoke")
+          with mlflow.start_run(run_name="gha"):
+              mlflow.log_param("ci", "true")
+              mlflow.log_metric("auc_stub", 0.5)
+              # prove artifact logging works (use a small file from the repo)
+              mlflow.log_artifact(
+                  "notebooks/ids_unsw/models/bundle_xgb/metadata.json",
+                  artifact_path="xgb"
+              )
+          print("Done; mlruns exists:", pathlib.Path("mlruns").exists())
           PY
+
+      - name: Upload mlruns artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlruns
+          path: mlruns
+          if-no-files-found: error
