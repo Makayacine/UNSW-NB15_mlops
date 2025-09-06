@@ -1,102 +1,48 @@
+# .github/workflows/ci.yml
 name: CI
-
-on:
-  push:
-    branches: [ main ]
-  pull_request:
+on: [push]
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      PYTHONUNBUFFERED: "1"
-      PIP_NO_CACHE_DIR: "1"
-
     steps:
-      - name: Checkout (with LFS)
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           lfs: true
-          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: python -m pip install --upgrade pip
+      - run: pip install -r requirements.txt
+      - name: Run tests
+        run: pytest -q
 
-      - name: Ensure LFS files are present
-        run: |
-          git lfs version
-          git lfs fetch --all
-          git lfs checkout
-          echo "---- LFS tracked files ----"
-          git lfs ls-files -l || true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+  mlflow:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
         with:
-          python-version: '3.11'
-
-      - name: Install deps
-        run: |
-          python -V
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            pip install onnxruntime==1.18.* onnx==1.16.* numpy pandas mlflow==3.3.2 pytest
-          fi
-          python - <<'PY'
-          import onnx, sys
-          import onnxruntime as ort
-          import numpy, pandas
-          print("onnx:", onnx.__version__)
-          print("onnxruntime:", ort.__version__)
-          print("numpy:", numpy.__version__)
-          print("pandas:", pandas.__version__)
-          PY
-
-      - name: Verify bundle
-        run: |
-          set -x
-          echo "== repo tree (bundle) =="
-          ls -lah notebooks/ids_unsw/models/bundle_xgb || true
-          python - <<'PY'
-          from pathlib import Path
-          b = Path("notebooks/ids_unsw/models/bundle_xgb")
-          for p in [b/"xgb.onnx", b/"feature_names.json", b/"metadata.json"]:
-              print(p, "exists?", p.exists(), "size=", (p.stat().st_size if p.exists() else "-"))
-          PY
-
-      - name: Run tests (capture log)
-        id: pytest
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          pytest -vv 2>&1 | tee pytest.log
-
-      - name: Show failing tail
-        if: steps.pytest.outcome == 'failure'
-        run: |
-          echo "---- last 200 lines of pytest.log ----"
-          tail -n 200 pytest.log || true
-
-      - name: MLflow smoke run (creates ./mlruns)
-        if: always()
+          lfs: true
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: python -m pip install --upgrade pip
+      - run: pip install mlflow onnx
+      - name: MLflow smoke run (log bundle)
         run: |
           python - <<'PY'
-          import os, mlflow
-          mlflow.set_tracking_uri("file://" + os.path.abspath("mlruns"))
+          import pathlib, mlflow
+          mlflow.set_tracking_uri("file:./mlruns")
           mlflow.set_experiment("ci-smoke")
-          with mlflow.start_run(run_name="ci"):
-              mlflow.log_metric("ok", 1.0)
-          print("mlflow smoke run completed")
+          b = pathlib.Path("notebooks/ids_unsw/models/bundle_xgb")
+          assert (b/"xgb.onnx").exists()
+          with mlflow.start_run(run_name="ci_smoke") as run:
+              mlflow.log_artifact(b/"xgb.onnx", artifact_path="xgb")
+              mlflow.log_artifact(b/"feature_names.json", artifact_path="xgb")
+              mlflow.log_artifact(b/"metadata.json", artifact_path="xgb")
+              print("RUN_ID:", run.info.run_id)
           PY
-
-      - name: Upload artifacts
-        if: always()
+      - name: Upload MLflow artifact store
         uses: actions/upload-artifact@v4
         with:
-          name: ci-artifacts
-          path: |
-            pytest.log
-            mlruns
-
-      - name: Fail if pytest failed
-        if: steps.pytest.outcome == 'failure'
-        run: exit 1
+          name: mlruns
+          path: mlruns
