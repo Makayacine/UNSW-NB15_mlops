@@ -176,17 +176,23 @@ jobs:
           curl -fsS -H "Authorization: Bearer ${{ secrets.IDS_API_TOKEN }}" \
                http://localhost:8000/features | head
       - name: Exercise /predict (zeros payload)
+        env:
+          IDS_API_TOKEN: ${{ secrets.IDS_API_TOKEN }}
         run: |
-          PAYLOAD=$(curl -fsS -H "Authorization: Bearer ${{ secrets.IDS_API_TOKEN }}" \
-                          http://localhost:8000/features | python3 - <<'PY'
-          import sys,json
-          feats=json.load(sys.stdin)["features"]
+          PAYLOAD=$(python3 - <<'PY'
+          import json, os, urllib.request
+          req = urllib.request.Request(
+              "http://localhost:8000/features",
+              headers={"Authorization": f"Bearer {os.environ['IDS_API_TOKEN']}"}
+          )
+          with urllib.request.urlopen(req) as r:
+              feats = json.load(r)["features"]
           print(json.dumps({"instances":[{k:0 for k in feats}]}))
           PY
           )
           echo "$PAYLOAD" | curl -fsS -X POST http://localhost:8000/predict \
             -H 'Content-Type: application/json' \
-            -H "Authorization: Bearer ${{ secrets.IDS_API_TOKEN }}" \
+            -H "Authorization: Bearer $IDS_API_TOKEN" \
             -d @- | head
       - name: Cleanup
         if: always()
