@@ -152,32 +152,45 @@ jobs:
       - name: Build image (local test tag)
         run: |
           docker build -f Dockerfile.api -t ids-unsw-api:local .
-      # Start the container and wait for it to be ready
       - name: Run container
         run: |
-          docker run -d --name ids -p 8000:8000 ids-unsw-api:local
-          # wait for /health
-          for i in {1..30}; do
-            curl -sf -H "Authorization: Bearer supersecret123" http://122.0.0.1:8000/health && break
-            sleep 1
-          done
-      # Hit /features and /predict with a tiny payload
-      - name: Exercise API
+          docker rm -f ids-unsw-api 2>/dev/null || true
+          docker run -d --name ids-unsw-api -p 8000:8000 \
+            -e IDS_API_TOKEN=${{ secrets.IDS_API_TOKEN }} \
+            ids-unsw-api:local
+      - name: Wait for API (max 60s)
         run: |
-          echo "== /health =="
-          curl -s -H "Authorization: Bearer supersecret123" http://127.0.0.1:8000/health | jq .
-          echo "== /features =="
-          curl -s -H "Authorization: Bearer supersecret123" http://127.0.0.1:8000/features | jq .
-          echo "== /predict =="
-          curl -s -H "Authorization: Bearer supersecret123" \
-               -H 'Content-Type: application/json' \
-               -X POST \
-               --data '{"instances":[{"dur":0,"proto":0,"service":0,"state":0,"spkts":0,"dpkts":0,"sbytes":0,"dbytes":0,"rate":0,"sload":0,"dload":0,"sloss":0,"dloss":0,"sinpkt":0,"dinpkt":0,"sjit":0,"djit":0,"swin":0,"stcpb":0,"dtcpb":0,"dwin":0,"tcprtt":0,"synack":0,"ackdat":0,"smean":0,"dmean":0,"trans_depth":0,"response_body_len":0,"ct_src_dport_ltm":0,"ct_dst_sport_ltm":0,"is_ftp_login":0,"ct_ftp_cmd":0,"ct_flw_http_mthd":0,"is_sm_ips_ports":0}]}' \
-               http://127.0.0.1:8000/predict | jq .
-      # Always stop the container so the job can finish cleanly
-      - name: Stop container
+          for i in {1..30}; do
+            if curl -fsS -H "Authorization: Bearer ${{ secrets.IDS_API_TOKEN }}" \
+                 http://localhost:8000/health | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+              echo "API is up"; exit 0
+            fi
+            echo "waiting for API... ($i)"; sleep 2
+          done
+          echo "::error::API never became ready. Logs:"
+          docker ps -a
+          docker logs ids-unsw-api || true
+          exit 1
+      - name: Exercise /features
+        run: |
+          curl -fsS -H "Authorization: Bearer ${{ secrets.IDS_API_TOKEN }}" \
+               http://localhost:8000/features | head
+      - name: Exercise /predict (zeros payload)
+        run: |
+          PAYLOAD=$(curl -fsS -H "Authorization: Bearer ${{ secrets.IDS_API_TOKEN }}" \
+                          http://localhost:8000/features | python3 - <<'PY'
+          import sys,json
+          feats=json.load(sys.stdin)["features"]
+          print(json.dumps({"instances":[{k:0 for k in feats}]}))
+          PY
+          )
+          echo "$PAYLOAD" | curl -fsS -X POST http://localhost:8000/predict \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer ${{ secrets.IDS_API_TOKEN }}" \
+            -d @- | head
+      - name: Cleanup
         if: always()
-        run: docker rm -f ids
+        run: docker rm -f ids-unsw-api
 
       - name: Compute tags/labels
         id: meta
