@@ -30,40 +30,109 @@ jobs:
       - name: Run tests
         run: pytest -q
 
-  mlflow:
+# --- new job: DATA -----------------------------------------------------------
+  data:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test]         # optional: run after unit/bundle tests
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - run: python -m pip install --upgrade pip
-      - run: pip install mlflow onnx
-      - name: MLflow smoke run (log bundle)
+        with: { python-version: '3.11' }
+      - run: pip install -r requirements.txt
+      - name: Create tiny raw dataset
         run: |
           python - <<'PY'
-          import pathlib, mlflow
-          mlflow.set_tracking_uri("file:./mlruns")
-          mlflow.set_experiment("ci-smoke")
-          b = pathlib.Path("notebooks/ids_unsw/models/bundle_xgb")
-          assert (b/"xgb.onnx").exists()
-          with mlflow.start_run(run_name="ci_smoke") as run:
-              mlflow.log_artifact(b/"xgb.onnx", artifact_path="xgb")
-              mlflow.log_artifact(b/"feature_names.json", artifact_path="xgb")
-              mlflow.log_artifact(b/"metadata.json", artifact_path="xgb")
-              print("RUN_ID:", run.info.run_id)
+          import pandas as pd, numpy as np, pathlib
+          out = pathlib.Path("artifacts/raw"); out.mkdir(parents=True, exist_ok=True)
+          df = pd.DataFrame({
+              "dur": np.linspace(0, 1, 16),
+              "sbytes": np.arange(16),
+              "label": (np.arange(16) % 2).astype(int),
+          })
+          df.to_csv(out/"raw.csv", index=False)
+          print("Wrote", out/"raw.csv")
           PY
-      - name: Upload MLflow artifact store
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raw
+          path: artifacts/raw
+# --- new job: FEATURES -------------------------------------------------------
+  features:
+    runs-on: ubuntu-latest
+    needs: [data]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: raw
+          path: work/raw
+      - name: Build features
+        run: |
+          python - <<'PY'
+          import pandas as pd, json, pathlib
+          raw = pathlib.Path('work/raw/raw.csv')
+          df  = pd.read_csv(raw)
+          X   = pd.DataFrame({
+              'x1': df['dur'],
+              'x2': (df['sbytes'] / max(df['sbytes'].max(), 1)),
+          })
+          y   = df['label']
+          out = pathlib.Path('artifacts/features'); out.mkdir(parents=True, exist_ok=True)
+          X.to_csv(out/'X.csv', index=False)
+          y.to_csv(out/'y.csv', index=False)
+          (out/'feature_names.json').write_text(json.dumps({'features': list(X.columns)}))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: features
+          path: artifacts/features
+# --- new job: TRAIN ----------------------------------------------------------
+  train:
+    runs-on: ubuntu-latest
+    needs: [features]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: features
+          path: work/features
+      - name: Train & log with MLflow
+        run: |
+          python - <<'PY'
+          import pandas as pd, numpy as np, pathlib, json, mlflow, os, shutil
+          X = pd.read_csv('work/features/X.csv').values
+          y = pd.read_csv('work/features/y.csv').values.ravel()
+          # tiny closed-form "model" using least squares
+          X1 = np.c_[np.ones(len(X)), X]
+          w, *_ = np.linalg.lstsq(X1, y, rcond=None)
+          pred = X1 @ w
+          rmse = float(np.sqrt(((pred - y)**2).mean()))
+          mlflow.set_tracking_uri('file://' + str(pathlib.Path.cwd()/'mlruns'))
+          mlflow.set_experiment('ci-demo')
+          with mlflow.start_run(run_name='train-ci'):
+              mlflow.log_metric('rmse', rmse)
+              np.savez('model.npz', w=w)
+              mlflow.log_artifact('model.npz', artifact_path='model')
+              pathlib.Path('model').mkdir(exist_ok=True)
+              (pathlib.Path('model')/'metrics.json').write_text(json.dumps({'rmse': rmse}))
+          out = pathlib.Path('artifacts/train'); out.mkdir(parents=True, exist_ok=True)
+          shutil.copytree('mlruns', out/'mlruns', dirs_exist_ok=True)
+          print('RMSE:', rmse)
+          PY
+      - uses: actions/upload-artifact@v4
         with:
           name: mlruns
-          path: mlruns
+          path: artifacts/train/mlruns
 
   docker:
     runs-on: ubuntu-latest
-    needs: [test, mlflow]
+    needs: [test, train]
     steps:
       - name: Checkout (with LFS for ONNX bundle)
         uses: actions/checkout@v4
