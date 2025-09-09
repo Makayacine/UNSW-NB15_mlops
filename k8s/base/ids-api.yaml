@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ids-api
+  namespace: ids
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ids-api
+  template:
+    metadata:
+      labels:
+        app: ids-api
+    spec:
+      containers:
+      - name: api
+        image: ids-unsw-api:local
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8000
+        env:
+        - name: IDS_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: ids-api-secrets
+              key: IDS_API_TOKEN
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ids-api
+  namespace: ids
+spec:
+  type: ClusterIP
+  selector:
+    app: ids-api
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000

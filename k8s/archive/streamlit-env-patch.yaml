@@ -1,0 +1,13 @@
+spec:
+  template:
+    spec:
+      containers:
+      - name: ui
+        env:
+        - name: IDS_API_BASE
+          value: http://ids-api:8000
+        - name: IDS_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: ids-api-secrets
+              key: IDS_API_TOKEN

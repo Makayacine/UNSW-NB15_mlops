@@ -1,0 +1,7 @@
+spec:
+  template:
+    spec:
+      containers:
+      - name: ui
+        image: ids_ui:latest
+        imagePullPolicy: Never

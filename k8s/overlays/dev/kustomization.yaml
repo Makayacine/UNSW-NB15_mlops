@@ -1,0 +1,20 @@
+resources:
+  - ../../base
+  - ids-api-hpa.yaml
+
+patches:
+  - path: metrics-server-svc-patch.yaml
+  - target:
+      kind: Service
+      name: streamlit
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: replace
+        path: /spec/ports/0/nodePort
+        value: 30050
+  - target:
+      kind: Deployment
+      name: ids-api
+    path: ids-api-resources.yaml

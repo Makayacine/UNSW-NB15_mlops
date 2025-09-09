@@ -1,0 +1,9 @@
+spec:
+  template:
+    spec:
+      containers:
+      - name: metrics-server
+        env:
+        - { name: HTTP_PROXY,  value: "" }
+        - { name: HTTPS_PROXY, value: "" }
+        - { name: NO_PROXY,    value: "127.0.0.1,localhost,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.cluster.local" }

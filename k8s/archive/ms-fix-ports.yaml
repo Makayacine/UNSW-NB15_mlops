@@ -1,0 +1,24 @@
+spec:
+  template:
+    spec:
+      containers:
+      - name: metrics-server
+        args:
+        - --cert-dir=/tmp
+        - --secure-port=4443
+        - --kubelet-insecure-tls
+        - --kubelet-preferred-address-types=InternalIP,Hostname
+        ports:
+        - name: https
+          containerPort: 4443
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            scheme: HTTPS
+            path: /readyz
+            port: https
+        livenessProbe:
+          httpGet:
+            scheme: HTTPS
+            path: /livez
+            port: https

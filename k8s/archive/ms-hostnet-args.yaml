@@ -1,0 +1,13 @@
+spec:
+  template:
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+      - name: metrics-server
+        args:
+        - --kubelet-insecure-tls
+        - --kubelet-preferred-address-types=Hostname,InternalIP,ExternalIP
+        - --kubelet-use-node-status-port
+        - --secure-port=4443
+        - --cert-dir=/tmp

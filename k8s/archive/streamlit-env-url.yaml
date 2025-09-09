@@ -1,0 +1,8 @@
+spec:
+  template:
+    spec:
+      containers:
+      - name: ui
+        env:
+        - name: IDS_API_URL
+          value: http://ids-api:8000

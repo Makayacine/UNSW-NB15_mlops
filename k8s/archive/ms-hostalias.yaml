@@ -1,0 +1,7 @@
+spec:
+  template:
+    spec:
+      hostAliases:
+      - ip: "127.0.0.1"
+        hostnames:
+        - "docker-desktop"

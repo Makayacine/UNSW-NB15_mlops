@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: streamlit
+  namespace: ids
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: streamlit
+  template:
+    metadata:
+      labels:
+        app: streamlit
+    spec:
+      containers:
+        - name: ui
+          image: ids_ui:latest            # <— change if your tag is different
+          imagePullPolicy: IfNotPresent   # use local image if present
+          ports:
+            - containerPort: 8050
+          env:
+            - name: API_BASE_URL
+              value: "http://ids-api:8000"  # we'll create this service later
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8050
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: streamlit
+  namespace: ids
+spec:
+  type: ClusterIP
+  selector:
+    app: streamlit
+  ports:
+    - name: http
+      port: 8050
+      targetPort: 8050

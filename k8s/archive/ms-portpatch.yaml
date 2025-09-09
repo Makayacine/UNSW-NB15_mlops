@@ -1,0 +1,9 @@
+spec:
+  template:
+    spec:
+      containers:
+      - name: metrics-server
+        ports:
+        - name: https
+          containerPort: 4443
+          protocol: TCP
