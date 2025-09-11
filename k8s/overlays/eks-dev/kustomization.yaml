@@ -1,0 +1,55 @@
+﻿apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ids
+
+resources:
+  - ../../base
+  - dash-ui.yaml
+  - ids-api-hpa.yaml
+
+patches:
+  # Make ids-api use ECR and pull the image
+  - target:
+      kind: Deployment
+      name: ids-api
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: ids-api
+      spec:
+        template:
+          spec:
+            containers:
+            - name: api
+              image: 002232587129.dkr.ecr.af-south-1.amazonaws.com/ids-unsw-api:latest
+              imagePullPolicy: IfNotPresent
+
+  # Keep your CPU/mem requests/limits (existing file)
+  - target:
+      kind: Deployment
+      name: ids-api
+    path: ids-api-resources.yaml
+
+  # Delete streamlit coming from base
+  - target:
+      kind: Deployment
+      name: streamlit
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: streamlit
+        namespace: ids
+      $patch: delete
+
+  - target:
+      kind: Service
+      name: streamlit
+    patch: |-
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: streamlit
+        namespace: ids
+      $patch: delete
