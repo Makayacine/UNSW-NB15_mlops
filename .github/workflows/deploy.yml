@@ -18,8 +18,10 @@ jobs:
   build-deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout (with LFS)
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Configure AWS credentials (secrets mode)
         uses: aws-actions/configure-aws-credentials@v4
@@ -33,19 +35,20 @@ jobs:
           aws ecr get-login-password --region "$AWS_REGION" \
             | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
-      # ---- Build & tag images (also with commit SHA) ----
+      # Build images (tag with SHA)
       - name: Build API image
         run: |
           docker build -f Dockerfile.api \
             -t "$ECR_REGISTRY/$API_IMAGE:latest" \
             -t "$ECR_REGISTRY/$API_IMAGE:${GITHUB_SHA}" .
+
       - name: Build UI image
         run: |
           docker build -f Dockerfile.ui \
             -t "$ECR_REGISTRY/$UI_IMAGE:latest" \
             -t "$ECR_REGISTRY/$UI_IMAGE:${GITHUB_SHA}" .
 
-      # ---- Local API smoke test (before push/deploy) ----
+      # --- Local smoke test for API before pushing ---
       - name: Start API under test (local)
         run: |
           docker run -d --rm --name api-under-test \
@@ -55,16 +58,17 @@ jobs:
 
       - name: Wait for /health with token
         run: |
-          for i in {1..60}; do
-            if curl -fsS \
-                 -H "Authorization: Bearer ${IDS_API_TOKEN}" \
+          for i in {1..90}; do
+            if curl -fsS -H "Authorization: Bearer ${IDS_API_TOKEN}" \
                  http://localhost:8000/health >/dev/null; then
-              echo "API is healthy"; break
+              echo "API is healthy"; exit 0
+            fi
+            if ! docker ps --format '{{.Names}}' | grep -q '^api-under-test$'; then
+              echo "Container exited, logs follow:"; docker logs api-under-test || true; exit 1
             fi
             sleep 2
           done
-          # Fail if the loop never broke
-          curl -fsS -H "Authorization: Bearer ${IDS_API_TOKEN}" http://localhost:8000/health >/dev/null
+          echo "Timed out waiting for API"; docker logs api-under-test || true; exit 1
 
       - name: Install Newman
         run: npm install -g newman
@@ -102,7 +106,7 @@ jobs:
         if: always()
         run: docker stop api-under-test || true
 
-      # ---- Push images only after tests pass ----
+      # --- Push images after tests pass ---
       - name: Push API image
         run: |
           docker push "$ECR_REGISTRY/$API_IMAGE:latest"
@@ -113,7 +117,7 @@ jobs:
           docker push "$ECR_REGISTRY/$UI_IMAGE:latest"
           docker push "$ECR_REGISTRY/$UI_IMAGE:${GITHUB_SHA}"
 
-      # ---- Deploy to EKS ----
+      # --- Deploy to EKS ---
       - name: Install kubectl
         uses: azure/setup-kubectl@v4
         with:
