@@ -12,85 +12,15 @@ env:
   K8S_NAMESPACE: ${{ secrets.K8S_NAMESPACE }}
   API_IMAGE: ids-unsw-api
   UI_IMAGE: ids-ui
+  IDS_API_TOKEN: ${{ secrets.IDS_API_TOKEN }}
 
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
     steps:
-      # --- Make sure LFS model files (e.g., ONNX) are present ---
-      - name: Checkout (with LFS)
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          lfs: true
-          fetch-depth: 0
-      - name: Ensure LFS files
-        run: |
-          git lfs install
-          git lfs pull
-          git lfs ls-files
 
-      # --- Build images (no push yet) ---
-      - name: Build API image
-        run: |
-          docker build -f Dockerfile.api \
-            -t "$ECR_REGISTRY/$API_IMAGE:${GITHUB_SHA}" \
-            -t "$ECR_REGISTRY/$API_IMAGE:latest" .
-      - name: Build UI image
-        run: |
-          docker build -f Dockerfile.ui \
-            -t "$ECR_REGISTRY/$UI_IMAGE:${GITHUB_SHA}" \
-            -t "$ECR_REGISTRY/$UI_IMAGE:latest" .
-
-      # --- Pre-push smoke: run API locally and test with Newman ---
-      - name: Install Newman (Postman CLI)
-        run: |
-          npm install -g newman
-
-      - name: Start API container (for smoke tests)
-        env:
-          IDS_API_TOKEN: ${{ secrets.IDS_API_TOKEN }}
-        run: |
-          docker run -d --rm --name api-under-test \
-            -e IDS_API_TOKEN="$IDS_API_TOKEN" \
-            -p 8000:8000 \
-            "$ECR_REGISTRY/$API_IMAGE:${GITHUB_SHA}"
-
-      - name: Wait for /health
-        run: |
-          for i in {1..60}; do
-            if curl -fsS http://localhost:8000/health >/dev/null; then
-              echo "API is healthy"; exit 0
-            fi
-            sleep 2
-          done
-          echo "API did not become healthy in time"
-          docker logs api-under-test || true
-          exit 1
-
-      - name: Run Postman collection
-        env:
-          IDS_API_TOKEN: ${{ secrets.IDS_API_TOKEN }}
-        run: |
-          mkdir -p test-results
-          newman run ids_unsw/tests/UNSW_IDS_API.postman_collection.json \
-            --env-var baseUrl=http://localhost:8000 \
-            --env-var apiToken="$IDS_API_TOKEN" \
-            --reporters cli,junit \
-            --reporter-junit-export test-results/newman.xml \
-            --bail
-
-      - name: Upload API test report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: newman-report
-          path: test-results/newman.xml
-
-      - name: Stop API container
-        if: always()
-        run: docker stop api-under-test || true
-
-      # --- ECR login + push (only if tests passed) ---
       - name: Configure AWS credentials (secrets mode)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -103,17 +33,87 @@ jobs:
           aws ecr get-login-password --region "$AWS_REGION" \
             | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
+      # ---- Build & tag images (also with commit SHA) ----
+      - name: Build API image
+        run: |
+          docker build -f Dockerfile.api \
+            -t "$ECR_REGISTRY/$API_IMAGE:latest" \
+            -t "$ECR_REGISTRY/$API_IMAGE:${GITHUB_SHA}" .
+      - name: Build UI image
+        run: |
+          docker build -f Dockerfile.ui \
+            -t "$ECR_REGISTRY/$UI_IMAGE:latest" \
+            -t "$ECR_REGISTRY/$UI_IMAGE:${GITHUB_SHA}" .
+
+      # ---- Local API smoke test (before push/deploy) ----
+      - name: Start API under test (local)
+        run: |
+          docker run -d --rm --name api-under-test \
+            -e IDS_API_TOKEN="${IDS_API_TOKEN}" \
+            -p 8000:8000 \
+            "$ECR_REGISTRY/$API_IMAGE:${GITHUB_SHA}"
+
+      - name: Wait for /health with token
+        run: |
+          for i in {1..60}; do
+            if curl -fsS \
+                 -H "Authorization: Bearer ${IDS_API_TOKEN}" \
+                 http://localhost:8000/health >/dev/null; then
+              echo "API is healthy"; break
+            fi
+            sleep 2
+          done
+          # Fail if the loop never broke
+          curl -fsS -H "Authorization: Bearer ${IDS_API_TOKEN}" http://localhost:8000/health >/dev/null
+
+      - name: Install Newman
+        run: npm install -g newman
+
+      - name: Generate env.json for Newman
+        run: |
+          mkdir -p test-results
+          cat > env.json <<'EOF'
+          {
+            "id": "ci-env",
+            "name": "CI",
+            "values": [
+              {"key":"baseUrl","value":"http://localhost:8000","type":"text","enabled":true},
+              {"key":"apiToken","value":"__TOKEN__","type":"text","enabled":true}
+            ]
+          }
+          EOF
+          sed -i "s/__TOKEN__/${IDS_API_TOKEN}/" env.json
+
+      - name: Run Newman smoke tests
+        run: |
+          newman run ids_unsw/tests/UNSW_IDS_API.postman_collection.json \
+            -e env.json \
+            --reporters cli,junit \
+            --reporter-junit-export test-results/newman.xml
+
+      - name: Upload Newman report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-report
+          path: test-results/newman.xml
+
+      - name: Stop API under test
+        if: always()
+        run: docker stop api-under-test || true
+
+      # ---- Push images only after tests pass ----
       - name: Push API image
         run: |
-          docker push "$ECR_REGISTRY/$API_IMAGE:${GITHUB_SHA}"
           docker push "$ECR_REGISTRY/$API_IMAGE:latest"
+          docker push "$ECR_REGISTRY/$API_IMAGE:${GITHUB_SHA}"
 
       - name: Push UI image
         run: |
-          docker push "$ECR_REGISTRY/$UI_IMAGE:${GITHUB_SHA}"
           docker push "$ECR_REGISTRY/$UI_IMAGE:latest"
+          docker push "$ECR_REGISTRY/$UI_IMAGE:${GITHUB_SHA}"
 
-      # --- Deploy to EKS ---
+      # ---- Deploy to EKS ----
       - name: Install kubectl
         uses: azure/setup-kubectl@v4
         with:
@@ -127,7 +127,7 @@ jobs:
 
       - name: Roll deployments to new images by commit
         run: |
-          kubectl -n "$K8S_NAMESPACE" set image deploy/ids-api api="$ECR_REGISTRY/$API_IMAGE:${GITHUB_SHA}"
+          kubectl -n "$K8S_NAMESPACE" set image deploy/ids-api  api="$ECR_REGISTRY/$API_IMAGE:${GITHUB_SHA}"
           kubectl -n "$K8S_NAMESPACE" set image deploy/dash-ui ui="$ECR_REGISTRY/$UI_IMAGE:${GITHUB_SHA}"
 
       - name: Wait for rollouts
