@@ -17,9 +17,80 @@ jobs:
   build-deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      # --- Make sure LFS model files (e.g., ONNX) are present ---
+      - name: Checkout (with LFS)
         uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 0
+      - name: Ensure LFS files
+        run: |
+          git lfs install
+          git lfs pull
+          git lfs ls-files
 
+      # --- Build images (no push yet) ---
+      - name: Build API image
+        run: |
+          docker build -f Dockerfile.api \
+            -t "$ECR_REGISTRY/$API_IMAGE:${GITHUB_SHA}" \
+            -t "$ECR_REGISTRY/$API_IMAGE:latest" .
+      - name: Build UI image
+        run: |
+          docker build -f Dockerfile.ui \
+            -t "$ECR_REGISTRY/$UI_IMAGE:${GITHUB_SHA}" \
+            -t "$ECR_REGISTRY/$UI_IMAGE:latest" .
+
+      # --- Pre-push smoke: run API locally and test with Newman ---
+      - name: Install Newman (Postman CLI)
+        run: |
+          npm install -g newman
+
+      - name: Start API container (for smoke tests)
+        env:
+          IDS_API_TOKEN: ${{ secrets.IDS_API_TOKEN }}
+        run: |
+          docker run -d --rm --name api-under-test \
+            -e IDS_API_TOKEN="$IDS_API_TOKEN" \
+            -p 8000:8000 \
+            "$ECR_REGISTRY/$API_IMAGE:${GITHUB_SHA}"
+
+      - name: Wait for /health
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8000/health >/dev/null; then
+              echo "API is healthy"; exit 0
+            fi
+            sleep 2
+          done
+          echo "API did not become healthy in time"
+          docker logs api-under-test || true
+          exit 1
+
+      - name: Run Postman collection
+        env:
+          IDS_API_TOKEN: ${{ secrets.IDS_API_TOKEN }}
+        run: |
+          mkdir -p test-results
+          newman run ids_unsw/tests/UNSW_IDS_API.postman_collection.json \
+            --env-var baseUrl=http://localhost:8000 \
+            --env-var apiToken="$IDS_API_TOKEN" \
+            --reporters cli,junit \
+            --reporter-junit-export test-results/newman.xml \
+            --bail
+
+      - name: Upload API test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-report
+          path: test-results/newman.xml
+
+      - name: Stop API container
+        if: always()
+        run: docker stop api-under-test || true
+
+      # --- ECR login + push (only if tests passed) ---
       - name: Configure AWS credentials (secrets mode)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -32,27 +103,17 @@ jobs:
           aws ecr get-login-password --region "$AWS_REGION" \
             | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
-      # ---- Build & push API ----
-      - name: Build API image
-        run: |
-          docker build -f Dockerfile.api -t "$ECR_REGISTRY/$API_IMAGE:latest" \
-            -t "$ECR_REGISTRY/$API_IMAGE:${GITHUB_SHA}" .
       - name: Push API image
         run: |
-          docker push "$ECR_REGISTRY/$API_IMAGE:latest"
           docker push "$ECR_REGISTRY/$API_IMAGE:${GITHUB_SHA}"
+          docker push "$ECR_REGISTRY/$API_IMAGE:latest"
 
-      # ---- Build & push UI ----
-      - name: Build UI image
-        run: |
-          docker build -f Dockerfile.ui -t "$ECR_REGISTRY/$UI_IMAGE:latest" \
-            -t "$ECR_REGISTRY/$UI_IMAGE:${GITHUB_SHA}" .
       - name: Push UI image
         run: |
-          docker push "$ECR_REGISTRY/$UI_IMAGE:latest"
           docker push "$ECR_REGISTRY/$UI_IMAGE:${GITHUB_SHA}"
+          docker push "$ECR_REGISTRY/$UI_IMAGE:latest"
 
-      # ---- Deploy to EKS ----
+      # --- Deploy to EKS ---
       - name: Install kubectl
         uses: azure/setup-kubectl@v4
         with:
@@ -61,11 +122,9 @@ jobs:
       - name: Update kubeconfig
         run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER"
 
-      # Apply kustomize overlay (ids-api resources, dash-ui svc/deploy)
       - name: Apply Kustomize overlay
         run: kubectl apply -k k8s/overlays/eks-dev
 
-      # Point the running Deployments at the *exact* new tags to force a rollout
       - name: Roll deployments to new images by commit
         run: |
           kubectl -n "$K8S_NAMESPACE" set image deploy/ids-api api="$ECR_REGISTRY/$API_IMAGE:${GITHUB_SHA}"
