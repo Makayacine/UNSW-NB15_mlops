@@ -6,12 +6,13 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     rm -rf /var/lib/apt/lists/*
 
 # Jupyter + data stack + client-only MLflow + libs
+# CORRECTED: Added a backslash to continue the RUN command
 RUN pip install --no-cache-dir \
     "nvidia-cudnn-cu12>=9,<10" \
     "nvidia-cublas-cu12>=12" \
-    jupyter pandas scikit-learn matplotlib seaborn pyarrow \
+    jupyter pandas scikit-learn==1.7.1  matplotlib seaborn pyarrow \
     mlflow-skinny==3.3.2 xgboost onnx onnxruntime tqdm \
-    cupy-cuda12x onnxmltools onnxconverter-common skl2onnx
+    cupy-cuda12x onnxmltools onnxconverter-common skl2onnx \
     fastapi uvicorn
 
 # ---- PyTorch (GPU, CUDA 12.8 wheels) ----
@@ -27,3 +28,4 @@ ENV MLFLOW_TRACKING_URI="http://host.docker.internal:5000"
 
 WORKDIR /tf
 CMD ["bash","-lc","jupyter lab --ip=0.0.0.0 --no-browser --allow-root --ServerApp.token='' --ServerApp.password=''"]
+

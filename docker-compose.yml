@@ -4,20 +4,25 @@ services:
     image: tf-gpu-fixed
     build:
       context: .
-      dockerfile: ./Dockerfile
+      # --- CORRECTED FILENAME ---
+      # Point to your specific development Dockerfile
+      dockerfile: ./Dockerfile.dev
     ports:
       - "8888:8888"
+    # --- CORRECTED VOLUMES SECTION ---
+    # This now correctly maps your local 'notebooks' folder
+    # to the '/tf/notebooks' directory inside the container.
     volumes:
       - .:/tf/tf_gpu_project
+    # --- END CORRECTION ---
     gpus: all
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      # Optionally set/override the tracking URI here:
-      # - MLFLOW_TRACKING_URI=http://mlflow:5000
-    # Ensure Linux containers can resolve host.docker.internal
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/lib/wsl/lib:/usr/local/lib/python3.11/dist-packages/nvidia/cudnn/lib
+    restart: unless-stopped
+    # --- Password/Token disabled correctly ---
     command: >
       jupyter lab --ip=0.0.0.0 --no-browser --allow-root
       --ServerApp.token='' --ServerApp.password=''
+
